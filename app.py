@@ -4,19 +4,25 @@ import streamlit as st
 from groq import Groq
 from dotenv import load_dotenv
 
-# Load environmental variables
+# Load environmental variables (reads .env locally)
 load_dotenv()
 
-# Initialize Groq client
-@st.cache_resource
-def get_groq_client():
+# --- Helper Functions ---
+
+def get_groq_client(sidebar_key=None):
+    """
+    Safely retrieves or initializes the Groq client.
+    Returns None if no key is supplied, preventing application startup crashes.
+    """
+    if sidebar_key:
+        return Groq(api_key=sidebar_key)
+        
     api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        st.warning("⚠️ GROQ_API_KEY not found in environment variables. Please provide it in the sidebar.")
-    return Groq(api_key=api_key)
+    if api_key:
+        return Groq(api_key=api_key)
+        
+    return None
 
-
-# --- Core Groq Prompt Implementations (Using JSON Object Mode) ---
 
 def analyze_kdp_metadata(client, title, subtitle, description):
     """Generates 7 long-tail keyword phrases and exactly 3 valid Amazon Store Category paths."""
@@ -117,13 +123,14 @@ st.set_page_config(page_title="Amazon KDP MetaOptimizer", page_icon="📚", layo
 
 # Sidebar Configuration
 st.sidebar.title("🔑 Configuration")
-sidebar_key = st.sidebar.text_input("Enter Groq API Key:", type="password", help="If left empty, the app will try to read GROQ_API_KEY from environment files.")
+sidebar_key = st.sidebar.text_input(
+    "Enter Groq API Key:", 
+    type="password", 
+    help="If you haven't added GROQ_API_KEY to your Streamlit secrets, enter it here."
+)
 
-# Resolve API Client
-if sidebar_key:
-    groq_client = Groq(api_key=sidebar_key)
-else:
-    groq_client = get_groq_client()
+# Safely resolve API Client (will remain None on startup if no key is supplied)
+groq_client = get_groq_client(sidebar_key)
 
 st.title("📚 Amazon KDP Metadata Optimizer")
 st.write("Optimize your Amazon store presence by generating high-impact, long-tail backend tags, exact store categories, and click-optimized titles.")
@@ -156,62 +163,66 @@ with col_input:
 with col_output:
     st.subheader("🎯 Optimization Output")
     
-    if not groq_client:
-        st.info("Provide a Groq API key to begin optimization runs.")
-        
-    elif run_seo_analysis:
-        if not title_input or not description_input:
-            st.error("Please provide both a Title and a Description to perform SEO analysis.")
+    # Lazy execution checks
+    if run_seo_analysis or run_title_generator:
+        if not groq_client:
+            st.error("🔑 **API Key Missing!** Please enter your Groq API Key in the sidebar or configure it in your Streamlit Secrets to proceed.")
+        elif not title_input or not description_input:
+            st.error("⚠️ Please provide both a Title and a Description to proceed.")
         else:
-            with st.spinner("Analyzing metadata with Groq..."):
-                try:
-                    seo_results = analyze_kdp_metadata(groq_client, title_input, subtitle_input, description_input)
-                    
-                    st.success("Analysis Complete!")
-                    
-                    # Display 7 Long-tail Keywords
-                    st.markdown("### 🏷️ 7 Long-Tail Backend Keyphrases")
-                    st.info("Paste these into KDP's 7 keyword slots. They avoid repeating words in your title/subtitle and focus on real reader search patterns.")
-                    
-                    # Render keyphrases as a neat list with character counts
-                    for i, tag in enumerate(seo_results["seven_backend_keywords"], 1):
-                        char_len = len(tag)
-                        color = "green" if char_len <= 50 else "red"
-                        st.markdown(f"**Slot {i}:** `{tag}`  *(Length: <span style='color:{color};'>{char_len} chars</span>)*", unsafe_allow_html=True)
-                    
-                    st.write("") # Spacer
-                    
-                    # Display 3 Categories
-                    st.markdown("### 📁 Standard Amazon Store Categories")
-                    st.warning("You can choose exactly 3 categories on your KDP dashboard. Use these paths to find them:")
-                    for cat in seo_results["suggested_categories"]:
-                        st.markdown(f"* **`{cat}`**")
+            # Route 1: KDP Tag & Category Generation
+            if run_seo_analysis:
+                with st.spinner("Analyzing metadata with Groq..."):
+                    try:
+                        seo_results = analyze_kdp_metadata(groq_client, title_input, subtitle_input, description_input)
                         
-                    # Display Strategy
-                    st.markdown("### 🧠 Strategic Reasoning")
-                    st.write(seo_results["optimization_reasoning"])
-                    
-                except Exception as e:
-                    st.error(f"Error communicating with Groq: {e}")
-                    
-    elif run_title_generator:
-        if not title_input or not description_input:
-            st.error("Please provide both a Draft Title and a Description to generate variations.")
-        else:
-            with st.spinner("Generating algorithm-optimized titles..."):
-                try:
-                    title_results = suggest_seo_titles(groq_client, title_input, subtitle_input, description_input)
-                    
-                    st.success("Optimization Strategies Generated!")
-                    st.markdown("### 💡 Recommended Hook Variations")
-                    
-                    for idx, option in enumerate(title_results["suggested_titles"], 1):
-                        with st.expander(f"Option {idx}: {option['title']}", expanded=True):
-                            st.markdown(f"**Suggested Title:** `{option['title']}`")
-                            st.markdown(f"**Suggested Subtitle:** *{option['subtitle']}*")
-                            st.markdown(f"**SEO Hook Strategy:** {option['strategy']}")
+                        st.success("Analysis Complete!")
+                        
+                        # Display 7 Long-tail Keywords
+                        st.markdown("### 🏷️ 7 Long-Tail Backend Keyphrases")
+                        st.info("Paste these into KDP's 7 keyword slots. They avoid repeating words in your title/subtitle and focus on real reader search patterns.")
+                        
+                        # Render keyphrases as a neat list with character counts
+                        for i, tag in enumerate(seo_results["seven_backend_keywords"], 1):
+                            char_len = len(tag)
+                            color = "green" if char_len <= 50 else "red"
+                            st.markdown(f"**Slot {i}:** `{tag}`  *(Length: <span style='color:{color};'>{char_len} chars</span>)*", unsafe_allow_html=True)
+                        
+                        st.write("") # Spacer
+                        
+                        # Display 3 Categories
+                        st.markdown("### 📁 Standard Amazon Store Categories")
+                        st.warning("You can choose exactly 3 categories on your KDP dashboard. Use these paths to find them:")
+                        for cat in seo_results["suggested_categories"]:
+                            st.markdown(f"* **`{cat}`**")
                             
-                except Exception as e:
-                    st.error(f"Error communicating with Groq: {e}")
+                        # Display Strategy
+                        st.markdown("### 🧠 Strategic Reasoning")
+                        st.write(seo_results["optimization_reasoning"])
+                        
+                    except Exception as e:
+                        st.error(f"Error communicating with Groq: {e}")
+                        
+            # Route 2: Title and Subtitle Optimization
+            elif run_title_generator:
+                with st.spinner("Generating algorithm-optimized titles..."):
+                    try:
+                        title_results = suggest_seo_titles(groq_client, title_input, subtitle_input, description_input)
+                        
+                        st.success("Optimization Strategies Generated!")
+                        st.markdown("### 💡 Recommended Hook Variations")
+                        
+                        for idx, option in enumerate(title_results["suggested_titles"], 1):
+                            with st.expander(f"Option {idx}: {option['title']}", expanded=True):
+                                st.markdown(f"**Suggested Title:** `{option['title']}`")
+                                st.markdown(f"**Suggested Subtitle:** *{option['subtitle']}*")
+                                st.markdown(f"**SEO Hook Strategy:** {option['strategy']}")
+                                
+                    except Exception as e:
+                        st.error(f"Error communicating with Groq: {e}")
     else:
-        st.write("Enter your book metadata on the left and select an optimization pathway to begin.")
+        # Prompt when the application is idle
+        if not groq_client:
+            st.info("👈 Enter your Groq API Key in the sidebar to activate the optimizer.")
+        else:
+            st.write("Enter your book metadata on the left and select an optimization pathway to begin.")
